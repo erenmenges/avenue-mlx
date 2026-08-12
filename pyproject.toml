@@ -1,0 +1,31 @@
+[project]
+name = "avenue-mlx"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Eren Menges", email = "erenmenges2@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "huggingface-hub>=1.27.0",
+    "mlx>=0.32.0",
+    "numpy>=2.5.2",
+    "tokenizers>=0.23.1",
+    "wandb>=0.28.1",
+]
+
+[project.scripts]
+avenue-mlx = "avenue_mlx:main"
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "nanobind>=2.14.0",
+]

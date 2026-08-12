@@ -1,1 +1,10 @@
-.DS_store
+.venv/
+.DS_Store/
+/.DS_Store/
+.vscode/
+__pycache__/
+.DS_Store
+.vscode/*
+data/
+checkpoints/
+wandb/
