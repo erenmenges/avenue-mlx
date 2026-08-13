@@ -121,18 +121,12 @@ def train(K: int, D: int, H: int, token_budget: int, muon_lr: float, adamw_lr: f
     RUN_DIR = config.CHECKPOINT_DIR / f"run_{run.id}_{run.name}"
     RUN_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("TRAIN.PY - IN PROGRESS: Starting model training loop")
-    print(f"TRAIN.PY: Will train for {max_steps} steps.")
-    print(f"TRAIN.PY - Model config: {model_config}")
-    print(f"TRAIN.PY - Number of parameters: {n_of_params}")
-
     # prepare for flip rate calculation
     if is_ternary:
         previous_weight = None
         current_weight = None
 
     loss_and_grad = nn.value_and_grad(lm, loss_fn)
-
 
     states = [lm.state, optimizers.state, mx.random.state]
     @partial(mx.compile, inputs=states, outputs=states)
@@ -142,15 +136,20 @@ def train(K: int, D: int, H: int, token_budget: int, muon_lr: float, adamw_lr: f
         optimizers.update(lm, grads)
         return loss, grad_norm
 
+    print("TRAIN.PY - IN PROGRESS: Starting model training loop")
+    print(f"TRAIN.PY: Will train for {max_steps:,} steps.")
+    print(f"TRAIN.PY - Number of parameters: {n_of_params:,} | Model config: {model_config}")
+
     start = time.perf_counter()
 
     for step in range(0, max_steps):
+        step_time = time.perf_counter()
         x_b, y_b = get_batch("train")
         loss, grad_norm = step_fn(x_b, y_b)
         mx.eval(states, loss, grad_norm)
         tokens_trained += y_b.size
 
-        if step % 50 == 0:
+        if step % 10 == 0:
             metrics = {"train_loss": loss.item(),
                         "grad_norm": grad_norm.item(),
                         "adamw_lr": optimizers.optimizers[0].learning_rate.item(),
@@ -177,9 +176,10 @@ def train(K: int, D: int, H: int, token_budget: int, muon_lr: float, adamw_lr: f
                 previous_weight = current_weight
             else:
                 print(
-                    f"TRAINING: Step: {step}, train loss: {loss.item():.3f} time elapsed: {time.perf_counter() - start:.2f}s,",
-                    f"tokens_trained: {tokens_trained}, tok/s:{tokens_trained /(time.perf_counter() - start):.2f}, grad_norm: {grad_norm.item():.2f},",
-                    f"MUON LR: {optimizers.optimizers[1].learning_rate.item():.6f}, ADAMW LR: {optimizers.optimizers[0].learning_rate.item():.6f}"
+                    f"TRAINING: Step: {step} | train loss: {loss.item():.3f} | time elapsed: {time.perf_counter() - start:,.0f}s |",
+                    f"Step time: {time.perf_counter() - step_time:.3f}s |",
+                    f"Tokens trained: {tokens_trained:,} | tok/s: {tokens_trained /(time.perf_counter() - start):,.0f} tokens | grad_norm: {grad_norm.item():.2f} |",
+                    f"MUON LR: {optimizers.optimizers[1].learning_rate.item():.6f} | ADAMW LR: {optimizers.optimizers[0].learning_rate.item():.6f}"
                     )
             wandb.log(metrics, step=step)
 
@@ -192,7 +192,7 @@ def train(K: int, D: int, H: int, token_budget: int, muon_lr: float, adamw_lr: f
                         "val_loss": val_loss,
                         "val_bpb": val_bpb},
                         step=step)
-            print(f"EVAL: Step: {step}, train loss: {loss.item():.3f}, val_loss: {val_loss:.3f}")
+            print(f"EVAL: Step: {step} | train loss: {loss.item():.3f} | val_loss: {val_loss:.3f}")
 
     # final eval
     final_val_loss, final_val_bpb = evaluate(lm, loss_fn, 50)
