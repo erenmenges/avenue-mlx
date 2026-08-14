@@ -6,6 +6,16 @@ def loss_fn(model: Transformer, x: mx.array, y: mx.array):
     logits = model(x)
     return nn.losses.cross_entropy(logits.astype(mx.float32), y, reduction="mean")
 
+# mixed precision stuff
+class BF16Linear(nn.Linear):
+    def __call__(self, x):
+        return x @ self.weight.astype(x.dtype).T
+
+class BF16RMSNorm(nn.RMSNorm):
+    def __call__(self, x):
+        return mx.fast.rms_norm(x, self.weight.astype(x.dtype), self.eps)
+
+
 def quantize_weights(W: mx.array):
     quantized_W = W.astype(mx.float32)  ### cast to fp32
     abs_mu = quantized_W.abs().mean(axis=-1, keepdims=True)  ### shape: (..., 1)
@@ -29,7 +39,7 @@ class Bitlinear(nn.Module):
     def __init__(self, in_features: int, out_features: int):
         super().__init__()
 
-        self.rms = nn.RMSNorm(in_features)
+        self.rms = BF16RMSNorm(in_features)
         self.weight = mx.zeros((out_features, in_features))  ### immediately overwritten by _init_weights
 
     def __call__(self, x: mx.array):
@@ -38,8 +48,8 @@ class Bitlinear(nn.Module):
         W_quantized = quantize_weights(self.weight)
         W_quantized = self.weight + mx.stop_gradient(W_quantized - self.weight) ### forward uses quantized, backward uses latent weights
         x_quantized = forward_x + mx.stop_gradient(x_quantized - forward_x)
-        y = x_quantized @ W_quantized.T
-        return y.astype(x.dtype)
+        y = x_quantized.astype(mx.bfloat16) @ W_quantized.astype(mx.bfloat16).T
+        return y
 
 class TransformerBlock(nn.Module):
     def __init__(self, D: int, H: int, ternary: bool = False):
@@ -51,10 +61,10 @@ class TransformerBlock(nn.Module):
         self.ternary = ternary
 
         if not ternary:
-            self.Q_layer = nn.Linear(input_dims=D, output_dims=D, bias=False)  ### layernorm already acts like bias
-            self.K_layer = nn.Linear(input_dims=D, output_dims=D, bias=False)  ### layernorm already acts like bias
-            self.V_layer = nn.Linear(input_dims=D, output_dims=D, bias=False)  ### layernorm already acts like bias
-            self.O_layer = nn.Linear(input_dims=D, output_dims=D, bias=False)
+            self.Q_layer = BF16Linear(input_dims=D, output_dims=D, bias=False)  ### layernorm already acts like bias
+            self.K_layer = BF16Linear(input_dims=D, output_dims=D, bias=False)  ### layernorm already acts like bias
+            self.V_layer = BF16Linear(input_dims=D, output_dims=D, bias=False)  ### layernorm already acts like bias
+            self.O_layer = BF16Linear(input_dims=D, output_dims=D, bias=False)
         else:
             self.Q_layer = Bitlinear(in_features=D, out_features=D)
             self.K_layer = Bitlinear(in_features=D, out_features=D)
@@ -62,9 +72,9 @@ class TransformerBlock(nn.Module):
             self.O_layer = Bitlinear(in_features=D, out_features=D)
     
         if not ternary:
-            self.rms1 = nn.RMSNorm(dims=D)
-            self.rms2 = nn.RMSNorm(dims=D)
-            self.MLP = nn.Sequential(nn.Linear(input_dims=D, output_dims=4*D, bias=False), nn.GELU(), nn.Linear(input_dims=4*D, output_dims=D, bias=False))
+            self.rms1 = BF16RMSNorm(dims=D)
+            self.rms2 = BF16RMSNorm(dims=D)
+            self.MLP = nn.Sequential(BF16Linear(input_dims=D, output_dims=4*D, bias=False), nn.GELU(), BF16Linear(input_dims=4*D, output_dims=D, bias=False))
         else:
             self.up_layer   = Bitlinear(in_features=D, out_features=4*D)
             self.down_layer = Bitlinear(in_features=4*D, out_features=D)
@@ -98,7 +108,7 @@ class Transformer(nn.Module):
 
         self.main = nn.Sequential(*[TransformerBlock(D, H, ternary) for _ in range(K)])
 
-        self.rmsnorm_final = nn.RMSNorm(dims=D)
+        self.rmsnorm_final = BF16RMSNorm(dims=D)
 
         self._init_weights(K)
 
@@ -119,9 +129,9 @@ class Transformer(nn.Module):
         self.apply_to_modules(visit_module)
 
     def __call__(self, X: mx.array, return_hidden: bool = False):
-        embedded_X = self.embeddings(X)  ### (B,N) --> (B,N,D)
+        embedded_X = self.embeddings(X).astype(mx.bfloat16)  ### (B,N) --> (B,N,D)
         intermediate = self.main(embedded_X)
         intermediate = self.rmsnorm_final(intermediate)
         if return_hidden:
             return intermediate
-        return self.embeddings.as_linear(intermediate)
+        return intermediate @ self.embeddings.weight.astype(intermediate.dtype).T

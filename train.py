@@ -167,11 +167,12 @@ def train(K: int, D: int, H: int, token_budget: int, muon_lr: float, adamw_lr: f
                     metrics["latent_absmax"] = layer.weight.abs().max().item()
                     metrics["latent_absmean"] = layer.weight.abs().mean().item()
                     print(
-                        f"Step: {step}, train loss: {loss.item():.3f} time elapsed: {time.perf_counter() - start:.2f}s,",
-                        f"tokens_trained: {tokens_trained}, tok/s:{tokens_trained /(time.perf_counter() - start):.2f}, grad_norm: {grad_norm.item():.2f},",
-                        f"MUON LR: {optimizers.optimizers[1].learning_rate.item():.6f}, ADAMW LR: {optimizers.optimizers[0].learning_rate.item():.6f}",
-                        f"flip_rate_50: {(current_weight != previous_weight).astype(mx.float32).mean().item()}, frac_zero: {(current_weight == 0).astype(mx.float32).mean().item()},",
-                        f"latent_absmax: {layer.weight.abs().max().item()}, latent_absmean: {layer.weight.abs().mean().item()}"
+                        f"Step: {step} | train loss: {loss.item():.3f} | time elapsed: {time.perf_counter() - start:,.0f}s |",
+                        f"Step time: {time.perf_counter() - step_time:.3f}s |",
+                        f"tokens_trained: {tokens_trained:,} | tok/s: {tokens_trained /(time.perf_counter() - start):,.0f} tokens | grad_norm: {grad_norm.item():.2f} |",
+                        f"MUON LR: {optimizers.optimizers[1].learning_rate.item():.6f} | ADAMW LR: {optimizers.optimizers[0].learning_rate.item():.6f} |",
+                        f"flip_rate_50: {(current_weight != previous_weight).astype(mx.float32).mean().item():.3f} | frac_zero: {(current_weight == 0).astype(mx.float32).mean().item():.2f} |",
+                        f"latent_absmax: {layer.weight.abs().max().item():.5f} | latent_absmean: {layer.weight.abs().mean().item():.5f}"
                         )
                 previous_weight = current_weight
             else:
